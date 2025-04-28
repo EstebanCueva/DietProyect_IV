@@ -1,0 +1,49 @@
+﻿@model DietProyect_IV.Models.CalculoCalorias
+
+@{
+    ViewData["Title"] = "Edit";
+}
+
+<h1>Edit</h1>
+
+<h4>CalculoCalorias</h4>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <form asp-action="Edit">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <input type="hidden" asp-for="CalculoCaloriasId" />
+            <div class="form-group">
+                <label asp-for="TasaMetabolicaBasal" class="control-label"></label>
+                <input asp-for="TasaMetabolicaBasal" class="form-control" />
+                <span asp-validation-for="TasaMetabolicaBasal" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="CaloriasDiarias" class="control-label"></label>
+                <input asp-for="CaloriasDiarias" class="form-control" />
+                <span asp-validation-for="CaloriasDiarias" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="UsuarioId" class="control-label"></label>
+                <select asp-for="UsuarioId" class="form-control" asp-items="ViewBag.UsuarioId"></select>
+                <span asp-validation-for="UsuarioId" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="NivelActividadId" class="control-label"></label>
+                <select asp-for="NivelActividadId" class="form-control" asp-items="ViewBag.NivelActividadId"></select>
+                <span asp-validation-for="NivelActividadId" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <input type="submit" value="Save" class="btn btn-primary" />
+            </div>
+        </form>
+    </div>
+</div>
+
+<div>
+    <a asp-action="Index">Back to List</a>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
