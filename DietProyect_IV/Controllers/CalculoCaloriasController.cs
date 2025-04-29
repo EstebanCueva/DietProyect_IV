@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using DietProyect_IV.Data;
 using DietProyect_IV.Models;
+using DietProyect_IV.ViewModels;
 
 namespace DietProyect_IV.Controllers
 {
@@ -24,6 +23,151 @@ namespace DietProyect_IV.Controllers
         {
             var dietProyect_IVContext = _context.CalculoCalorias.Include(c => c.NivelActividad).Include(c => c.Usuario);
             return View(await dietProyect_IVContext.ToListAsync());
+        }
+
+        // GET: CalculoCalorias/Calculadora
+        public IActionResult Calculadora()
+        {
+            // Cargar los niveles de actividad para el dropdown
+            ViewBag.NivelesActividad = _context.Set<NivelActividad>().ToList();
+
+            return View();
+        }
+
+        // POST: CalculoCalorias/Calcular
+        [HttpPost]
+        public IActionResult Calcular(CalculadoraViewModel model)
+        {
+            if (ModelState.IsValid)
+            {
+                double tmb = 0;
+
+                if (model.Sexo == "Femenino")
+                {
+                    tmb = 655 + (9.6 * model.PesoKg) + (1.8 * model.AlturaCm) - (4.7 * model.Edad);
+                }
+                else // Masculino
+                {
+                    tmb = 66 + (13.7 * model.PesoKg) + (5 * model.AlturaCm) - (6.8 * model.Edad);
+                }
+
+                var nivelActividad = _context.Set<NivelActividad>().Find(model.NivelActividadId);
+                double factorActividad = nivelActividad?.FactorActividad ?? 1.2; // Valor por defecto si no se encuentra
+
+                double caloriasDiarias = tmb * factorActividad;
+
+                int ajusteCalorias = 0;
+                switch (model.Objetivo)
+                {
+                    case "Perder peso":
+                        ajusteCalorias = -500; // Déficit calórico para perder peso
+                        break;
+                    case "Ganar músculo":
+                        ajusteCalorias = 300; // Superávit calórico para ganar músculo
+                        break;
+                    case "Mantener peso":
+                        ajusteCalorias = 0; // Sin ajuste para mantener peso
+                        break;
+                }
+
+                double caloriasObjetivo = caloriasDiarias + ajusteCalorias;
+
+                var resultadoViewModel = new ResultadoCaloriasViewModel
+                {
+                    Nombre = model.Nombre,
+                    PesoKg = model.PesoKg,
+                    AlturaCm = model.AlturaCm,
+                    Edad = model.Edad,
+                    Sexo = model.Sexo,
+                    NivelActividad = nivelActividad?.Descripcion,
+                    Objetivo = model.Objetivo,
+                    TMB = Math.Round(tmb, 0),
+                    CaloriasDiarias = Math.Round(caloriasDiarias, 0),
+                    CaloriasObjetivo = Math.Round(caloriasObjetivo, 0),
+                    AjusteCalorias = ajusteCalorias,
+                    CalculadoraModel = model
+                };
+
+                TempData["ResultadoCaloriasViewModel"] = Newtonsoft.Json.JsonConvert.SerializeObject(resultadoViewModel);
+
+                return View("Resultado", resultadoViewModel);
+            }
+
+            ViewBag.NivelesActividad = _context.Set<NivelActividad>().ToList();
+            return View("Calculadora", model);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Guardar()
+        {
+            var resultadoJson = TempData["ResultadoCaloriasViewModel"] as string;
+            if (resultadoJson == null)
+            {
+                return RedirectToAction("Calculadora");
+            }
+
+            var resultado = Newtonsoft.Json.JsonConvert.DeserializeObject<ResultadoCaloriasViewModel>(resultadoJson);
+            var model = resultado.CalculadoraModel;
+
+            Usuario usuario;
+            if (!string.IsNullOrEmpty(model.Nombre))
+            {
+                usuario = await _context.Set<Usuario>().FirstOrDefaultAsync(u => u.Nombre == model.Nombre);
+            }
+            else
+            {
+                model.Nombre = "Usuario " + DateTime.Now.ToString("yyyyMMddHHmmss");
+                usuario = null;
+            }
+
+            if (usuario == null)
+            {
+                usuario = new Usuario
+                {
+                    Nombre = model.Nombre,
+                    Edad = model.Edad,
+                    PesoKg = model.PesoKg,
+                    AlturaCm = model.AlturaCm,
+                    Sexo = model.Sexo
+                };
+
+                _context.Add(usuario);
+                await _context.SaveChangesAsync();
+            }
+            else
+            {
+                usuario.Edad = model.Edad;
+                usuario.PesoKg = model.PesoKg;
+                usuario.AlturaCm = model.AlturaCm;
+                usuario.Sexo = model.Sexo;
+
+                _context.Update(usuario);
+                await _context.SaveChangesAsync();
+            }
+
+            var calculoCalorias = new CalculoCalorias
+            {
+                TasaMetabolicaBasal = resultado.TMB,
+                CaloriasDiarias = resultado.CaloriasObjetivo,
+                UsuarioId = usuario.UsuarioId,
+                NivelActividadId = model.NivelActividadId
+            };
+
+            _context.Add(calculoCalorias);
+            await _context.SaveChangesAsync();
+
+            var objetivoCalorico = new ObjetivoCalorico
+            {
+                TipoObjetivo = model.Objetivo,
+                AjusteCalorias = resultado.AjusteCalorias,
+                CalculoCaloriasId = calculoCalorias.CalculoCaloriasId
+            };
+
+            _context.Add(objetivoCalorico);
+            await _context.SaveChangesAsync();
+
+            TempData["Mensaje"] = "Cálculo guardado correctamente";
+            return RedirectToAction("Details", new { id = calculoCalorias.CalculoCaloriasId });
         }
 
         // GET: CalculoCalorias/Details/5
@@ -49,14 +193,12 @@ namespace DietProyect_IV.Controllers
         // GET: CalculoCalorias/Create
         public IActionResult Create()
         {
-            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "NivelActividadId");
-            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Sexo");
+            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "Descripcion");
+            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Nombre");
             return View();
         }
 
         // POST: CalculoCalorias/Create
-        // To protect from overposting attacks, enable the specific properties you want to bind to.
-        // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create([Bind("CalculoCaloriasId,TasaMetabolicaBasal,CaloriasDiarias,UsuarioId,NivelActividadId")] CalculoCalorias calculoCalorias)
@@ -67,8 +209,8 @@ namespace DietProyect_IV.Controllers
                 await _context.SaveChangesAsync();
                 return RedirectToAction(nameof(Index));
             }
-            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "NivelActividadId", calculoCalorias.NivelActividadId);
-            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Sexo", calculoCalorias.UsuarioId);
+            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "Descripcion", calculoCalorias.NivelActividadId);
+            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Nombre", calculoCalorias.UsuarioId);
             return View(calculoCalorias);
         }
 
@@ -85,14 +227,12 @@ namespace DietProyect_IV.Controllers
             {
                 return NotFound();
             }
-            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "NivelActividadId", calculoCalorias.NivelActividadId);
-            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Sexo", calculoCalorias.UsuarioId);
+            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "Descripcion", calculoCalorias.NivelActividadId);
+            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Nombre", calculoCalorias.UsuarioId);
             return View(calculoCalorias);
         }
 
         // POST: CalculoCalorias/Edit/5
-        // To protect from overposting attacks, enable the specific properties you want to bind to.
-        // For more details, see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(int id, [Bind("CalculoCaloriasId,TasaMetabolicaBasal,CaloriasDiarias,UsuarioId,NivelActividadId")] CalculoCalorias calculoCalorias)
@@ -122,8 +262,8 @@ namespace DietProyect_IV.Controllers
                 }
                 return RedirectToAction(nameof(Index));
             }
-            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "NivelActividadId", calculoCalorias.NivelActividadId);
-            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Sexo", calculoCalorias.UsuarioId);
+            ViewData["NivelActividadId"] = new SelectList(_context.Set<NivelActividad>(), "NivelActividadId", "Descripcion", calculoCalorias.NivelActividadId);
+            ViewData["UsuarioId"] = new SelectList(_context.Set<Usuario>(), "UsuarioId", "Nombre", calculoCalorias.UsuarioId);
             return View(calculoCalorias);
         }
 
